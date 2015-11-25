@@ -1,0 +1,10 @@
+﻿<ProgramTeams>
+  <Program name="Program - Marvel">
+    <Team name="Heroes" />
+    <Team name="Villains" />
+  </Program>
+  <Independent>
+    <Team name="Mutants (HW)" />
+    <Team name="Avengers" />
+  </Independent>
+</ProgramTeams>
