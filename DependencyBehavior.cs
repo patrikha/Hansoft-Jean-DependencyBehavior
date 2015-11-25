@@ -89,7 +89,7 @@ namespace Hansoft.Jean.Behavior.DependencyBehavior
             return t.IsCompleted || (EHPMTaskStatus)t.AggregatedStatus.Value == EHPMTaskStatus.Completed;
         }
 
-        public static string InternalDependencies(Task feature, IEnumerable<Release> linkedMilestones)
+        private static string InternalDependencies(Task feature, IEnumerable<Release> linkedMilestones)
         {
             var program = feature.Project.Name;
             var taggedTasks = linkedMilestones.SelectMany(t => t.ProductBacklogItems).Where(t => !LeafCompleted(t));
@@ -106,7 +106,7 @@ namespace Hansoft.Jean.Behavior.DependencyBehavior
             return internalDependencies;
         }
 
-        public static string ExternalDependencies(Release milestone)
+        private static string ExternalDependencies(Release milestone)
         {
             var program = milestone.Project.Name;
             var allDependencies = new HashSet<string>();
@@ -126,6 +126,38 @@ namespace Hansoft.Jean.Behavior.DependencyBehavior
             return externalDependencies;
         }
 
+        private static void ProcessInternalDependencies(Task feature)
+        {
+            var program = feature.Project.Name;
+            var linkedMilestones = feature.LinkedTasks.Where(t => t is Release && IsTeamProject(t) && ProgramTeamsConfig.IsTeamInProgram(program, TeamName(t))).Cast<Release>();
+            var value = linkedMilestones.Count() > 1 ? InternalDependencies(feature, linkedMilestones) : "";
+            feature.SetCustomColumnValue(INTERNAL_DEPENDENCIES, value);
+        }
+
+        private static void ProcessExternalDependencies(Release milestone)
+        {
+            var program = milestone.Project.Name;
+            var linkedItems = milestone.LinkedTasks.Where(t => IsTeamProject(t));
+            var value = linkedItems.Any(t => !ProgramTeamsConfig.IsTeamInProgram(program, TeamName(t))) ? ExternalDependencies(milestone) : "";
+            foreach (Task feature in milestone.ProductBacklogItems)
+            {
+                bool clearValue = true;
+                if (value == "")
+                {
+                    foreach (var otherMilestone in feature.TaggedToReleases.Where(t => t.Name != milestone.Name))
+                    {
+                        if (ExternalDependencies(otherMilestone) != "")
+                        {
+                            clearValue = false;
+                            break;
+                        }
+                    }
+                }
+                if (value != "" || (value == "" && clearValue))
+                    feature.SetCustomColumnValue(EXTERNAL_DEPENDENCIES, value);
+            }
+        }
+
         private void DoUpdate()
         {
             if (initializationOK)
@@ -133,18 +165,9 @@ namespace Hansoft.Jean.Behavior.DependencyBehavior
                 foreach (Project project in projects)
                 {
                     foreach (var feature in project.ProductBacklogItems)
-                    {
-                        var linkedMilestones = feature.LinkedTasks.Where(t => t is Release && IsTeamProject(t) && ProgramTeamsConfig.IsTeamInProgram(project.Name, TeamName(t))).Cast<Release>();
-                        var value = linkedMilestones.Count() > 1 ? InternalDependencies(feature, linkedMilestones) : "";
-                        feature.SetCustomColumnValue(INTERNAL_DEPENDENCIES, value);
-                    }
+                        ProcessInternalDependencies(feature);
                     foreach (var milestone in project.ScheduledItems.Where(r => r is Release).Cast<Release>())
-                    {
-                        var linkedItems = milestone.LinkedTasks.Where(t => IsTeamProject(t));
-                        var value = linkedItems.Any(t => !ProgramTeamsConfig.IsTeamInProgram(project.Name, TeamName(t))) ? ExternalDependencies(milestone) : "";
-                        foreach (Task feature in milestone.ProductBacklogItems)
-                            feature.SetCustomColumnValue(EXTERNAL_DEPENDENCIES, value);
-                    }
+                        ProcessExternalDependencies(milestone);
                 }
             }
         }
@@ -156,20 +179,10 @@ namespace Hansoft.Jean.Behavior.DependencyBehavior
                 Task task = Task.GetTask(e.Data.m_TaskID);
                 if (!projects.Contains(task.Project))
                     return;
-                var program = task.Project.Name;
-                var linkedItems = task.LinkedTasks.Where(t => IsTeamProject(t));
                 if (task is ProductBacklogItem)
-                {
-                    var linkedMilestones = linkedItems.Where(t => t is Release && IsTeamProject(t) && ProgramTeamsConfig.IsTeamInProgram(program, TeamName(t))).Cast<Release>();
-                    var value = linkedMilestones.Count() > 1 ? InternalDependencies(task, linkedMilestones) : "";
-                    task.SetCustomColumnValue(INTERNAL_DEPENDENCIES, value);
-                }
+                    ProcessInternalDependencies(task);
                 if (task is Release)
-                {
-                    var value = linkedItems.Any(t => !ProgramTeamsConfig.IsTeamInProgram(program, TeamName(t))) ? ExternalDependencies(task as Release) : "";
-                    foreach (Task feature in ((Release)task).ProductBacklogItems)
-                        feature.SetCustomColumnValue(EXTERNAL_DEPENDENCIES, value);
-                }
+                    ProcessExternalDependencies(task as Release);
             }
         }
     }
